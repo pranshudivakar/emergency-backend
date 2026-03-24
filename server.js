@@ -10,7 +10,8 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-  "https://your-frontend-url.vercel.app",
+  "https://emergency-frontend1.vercel.app", // ✅ Frontend URL
+  "https://emergency-backend-8n80.onrender.com",
 ];
 
 app.use(
@@ -70,6 +71,13 @@ const Hospital = mongoose.model(
       longitude: Number,
       phone: String,
       address: String,
+      emergency: String,
+      rating: String,
+      bedsAvailable: Number,
+      ambulances: Number,
+      image: String,
+      distance: String,
+      travelTime: String,
     },
     { timestamps: true },
   ),
@@ -216,6 +224,128 @@ app.get("/api/hospitals", async (req, res) => {
     success: true,
     hospitals,
   });
+});
+
+/* ===== INIT HOSPITALS - UPDATED WITH SECTOR 63 HOSPITALS ===== */
+app.post("/api/hospitals/init", async (req, res) => {
+  try {
+    // First, check if hospitals already exist
+    const existingHospitals = await Hospital.find();
+    if (existingHospitals.length > 0) {
+      return res.json({
+        success: true,
+        message: `Hospitals already exist (${existingHospitals.length} hospitals found)`,
+        count: existingHospitals.length,
+      });
+    }
+
+    // 5 Hospitals near Sector 63, Noida with front photos showing hospital names
+    const defaultHospitals = [
+      {
+        name: "Fortis Hospital",
+        email: "hospitalalerts4@gmail.com",
+        latitude: 28.6212,
+        longitude: 77.3796,
+        phone: "+91-120-1234567",
+        address: "Sector 62, Noida, Uttar Pradesh 201301",
+        emergency: "24/7",
+        rating: "4.8",
+        bedsAvailable: 200,
+        ambulances: 15,
+        distance: "2.5 km",
+        travelTime: "8 mins",
+        image:
+          "https://images.pexels.com/photos/236380/pexels-photo-236380.jpeg?w=500&h=300&fit=crop",
+      },
+      {
+        name: "Max Super Speciality Hospital",
+        email: "hospitalalerts4@gmail.com",
+        latitude: 28.6457,
+        longitude: 77.3179,
+        phone: "+91-11-12345678",
+        address: "Anand Vihar, Delhi - 110092",
+        emergency: "24/7",
+        rating: "4.7",
+        bedsAvailable: 180,
+        ambulances: 12,
+        distance: "6.8 km",
+        travelTime: "20 mins",
+        image:
+          "https://images.pexels.com/photos/3171567/pexels-photo-3171567.jpeg?w=500&h=300&fit=crop",
+      },
+      {
+        name: "Kailash Hospital",
+        email: "hospitalalerts4@gmail.com",
+        latitude: 28.5997,
+        longitude: 77.4012,
+        phone: "+91-120-4567890",
+        address: "Sector 71, Noida, Uttar Pradesh 201301",
+        emergency: "24/7",
+        rating: "4.5",
+        bedsAvailable: 150,
+        ambulances: 10,
+        distance: "3.2 km",
+        travelTime: "10 mins",
+        image:
+          "https://images.pexels.com/photos/263402/pexels-photo-263402.jpeg?w=500&h=300&fit=crop",
+      },
+      {
+        name: "Metro Hospital & Heart Institute",
+        email: "hospitalalerts4@gmail.com",
+        latitude: 28.5856,
+        longitude: 77.3181,
+        phone: "+91-120-9876543",
+        address: "Sector 12, Noida, Uttar Pradesh 201301",
+        emergency: "24/7",
+        rating: "4.6",
+        bedsAvailable: 220,
+        ambulances: 18,
+        distance: "5.1 km",
+        travelTime: "15 mins",
+        image:
+          "https://images.pexels.com/photos/4031815/pexels-photo-4031815.jpeg?w=500&h=300&fit=crop",
+      },
+      {
+        name: "Yatharth Super Speciality Hospital",
+        email: "hospitalalerts4@gmail.com",
+        latitude: 28.5789,
+        longitude: 77.4215,
+        phone: "+91-120-7890123",
+        address: "Sector 110, Noida, Uttar Pradesh 201304",
+        emergency: "24/7",
+        rating: "4.4",
+        bedsAvailable: 300,
+        ambulances: 20,
+        distance: "4.5 km",
+        travelTime: "12 mins",
+        image:
+          "https://images.pexels.com/photos/236477/pexels-photo-236477.jpeg?w=500&h=300&fit=crop",
+      },
+    ];
+
+    // Insert all hospitals
+    const result = await Hospital.insertMany(defaultHospitals);
+
+    console.log(
+      `✅ ${result.length} hospitals added successfully near Sector 63!`,
+    );
+    console.log("📍 Hospitals added:");
+    result.forEach((h) => {
+      console.log(`   - ${h.name}: ${h.address}`);
+    });
+
+    res.json({
+      success: true,
+      message: `${result.length} hospitals added successfully near Sector 63, Noida`,
+      hospitals: result,
+    });
+  } catch (error) {
+    console.log("❌ Error adding hospitals:", error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
 });
 
 /* ===== EMERGENCY ALERT ===== */
@@ -408,6 +538,20 @@ app.get("/api/emergency", async (req, res) => {
     success: true,
     data,
   });
+});
+
+/* ===== DELETE ALL HOSPITALS (FOR TESTING) ===== */
+app.delete("/api/hospitals/clear", async (req, res) => {
+  try {
+    const result = await Hospital.deleteMany({});
+    console.log(`🗑️ Deleted ${result.deletedCount} hospitals`);
+    res.json({
+      success: true,
+      message: `Deleted ${result.deletedCount} hospitals`,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 /* ===== SERVER ===== */
