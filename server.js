@@ -10,10 +10,10 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-  "https://emergency-frontend1.vercel.app", // ✅ Frontend URL
+  "https://emergency-frontend1.vercel.app",
+  "https://project-0kehm.vercel.app", // ✅ YE ADD KARO
   "https://emergency-backend-8n80.onrender.com",
 ];
-
 app.use(
   cors({
     origin: function (origin, callback) {
