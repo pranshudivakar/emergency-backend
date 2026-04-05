@@ -96,7 +96,7 @@ const Emergency = mongoose.model(
       longitude: Number,
       hospitalsNotified: [String],
       googleMapsUrl: String,
-      status: { type: String, default: "pending" }, // pending, accepted, rejected, no_hospitals
+      status: { type: String, default: "pending" },
       primaryHospitalId: String,
       acceptedHospital: String,
       acceptedAt: Date,
@@ -340,7 +340,7 @@ app.post("/api/hospitals/init", async (req, res) => {
   }
 });
 
-/* ===== EMERGENCY ALERT WITH CONFIRMATION ===== */
+/* ===== EMERGENCY ALERT ===== */
 app.post("/api/emergency", async (req, res) => {
   try {
     const { latitude, longitude, userId, name, phone, email } = req.body;
@@ -356,7 +356,6 @@ app.post("/api/emergency", async (req, res) => {
     console.log("User:", name, phone);
     console.log("Location:", latitude, longitude);
 
-    // Calculate and sort hospitals by distance
     const hospitals = await Hospital.find();
     const hospitalsWithDistance = hospitals.map((h) => ({
       ...h.toObject(),
@@ -364,16 +363,12 @@ app.post("/api/emergency", async (req, res) => {
     }));
     hospitalsWithDistance.sort((a, b) => a.distance - b.distance);
 
-    // Sirf pehle hospital ko email bhejo
     const primaryHospital = hospitalsWithDistance[0];
-
-    console.log(
-      `🚑 Sending alert to primary hospital: ${primaryHospital.name} (${primaryHospital.distance.toFixed(2)} km)`,
-    );
-
     const googleMapsUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
 
-    // Create emergency record
+    const baseUrl =
+      process.env.BACKEND_URL || "https://emergency-backend-8n80.onrender.com";
+
     const emergency = await Emergency.create({
       userId,
       userName: name,
@@ -387,10 +382,10 @@ app.post("/api/emergency", async (req, res) => {
       primaryHospitalId: primaryHospital._id,
     });
 
-    const acceptUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/api/emergency/accept/${emergency._id}?hospitalId=${primaryHospital._id}`;
-    const rejectUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/api/emergency/reject/${emergency._id}?hospitalId=${primaryHospital._id}`;
+    // ✅ USING GET METHOD FOR EMAIL LINKS
+    const acceptUrl = `${baseUrl}/api/emergency/accept/${emergency._id}?hospitalId=${primaryHospital._id}`;
+    const rejectUrl = `${baseUrl}/api/emergency/reject/${emergency._id}?hospitalId=${primaryHospital._id}`;
 
-    // Send email with Accept/Reject buttons
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: primaryHospital.email,
@@ -422,14 +417,17 @@ app.post("/api/emergency", async (req, res) => {
                 <h3>👤 Patient Details:</h3>
                 <p><strong>Name:</strong> ${name || "Not provided"}</p>
                 <p><strong>Phone:</strong> <a href="tel:${phone}">${phone || "Not provided"}</a></p>
-                <p><strong>Email:</strong> ${email || "Not provided"}</p>
                 <p><strong>Distance:</strong> ${primaryHospital.distance.toFixed(2)} km</p>
-                <p><strong>Location:</strong> ${latitude}, ${longitude}</p>
-                <p><strong>Google Maps:</strong> <a href="${googleMapsUrl}" target="_blank">Click here</a></p>
+                <p><strong>Location:</strong> <a href="${googleMapsUrl}" target="_blank">Open in Google Maps</a></p>
               </div>
               <div style="text-align: center;">
                 <a href="${acceptUrl}" class="button accept">✅ ACCEPT & Send Ambulance</a>
                 <a href="${rejectUrl}" class="button reject">❌ REJECT</a>
+              </div>
+              <div style="background: #f0f0f0; padding: 10px; margin-top: 20px; font-size: 12px;">
+                <p>If buttons don't work, copy these links:</p>
+                <p>✅ ACCEPT: ${acceptUrl}</p>
+                <p>❌ REJECT: ${rejectUrl}</p>
               </div>
             </div>
           </div>
@@ -440,56 +438,11 @@ app.post("/api/emergency", async (req, res) => {
 
     console.log(`✅ Email sent to: ${primaryHospital.name}`);
 
-    // Auto-forward after 5 minutes if no response
-    setTimeout(async () => {
-      const checkEmergency = await Emergency.findById(emergency._id);
-      if (checkEmergency && checkEmergency.status === "pending") {
-        console.log(
-          `⏰ No response from ${primaryHospital.name}, forwarding...`,
-        );
-
-        // Find next hospital
-        const nextHospital = hospitalsWithDistance.find(
-          (h) => h._id.toString() !== primaryHospital._id,
-        );
-
-        if (nextHospital) {
-          checkEmergency.hospitalsNotified.push(nextHospital.name);
-          checkEmergency.primaryHospitalId = nextHospital._id;
-          await checkEmergency.save();
-
-          const newAcceptUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/api/emergency/accept/${checkEmergency._id}?hospitalId=${nextHospital._id}`;
-          const newRejectUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/api/emergency/reject/${checkEmergency._id}?hospitalId=${nextHospital._id}`;
-
-          await transporter.sendMail({
-            from: process.env.EMAIL_USER,
-            to: nextHospital.email,
-            subject: `🚨 EMERGENCY - ${name || "Patient"} needs ambulance (Auto-forwarded)`,
-            html: `
-              <h2>🚨 Emergency Alert (Auto-Forwarded)</h2>
-              <p><strong>Patient:</strong> ${name}</p>
-              <p><strong>Phone:</strong> ${phone}</p>
-              <p><strong>Distance:</strong> ${nextHospital.distance.toFixed(2)} km</p>
-              <p><strong>Note:</strong> Previous hospital did not respond within 5 minutes.</p>
-              <a href="${newAcceptUrl}" style="background: green; color: white; padding: 10px;">✅ ACCEPT</a>
-              <a href="${newRejectUrl}" style="background: red; color: white; padding: 10px;">❌ REJECT</a>
-            `,
-          });
-          console.log(`✅ Auto-forwarded to: ${nextHospital.name}`);
-        } else {
-          checkEmergency.status = "no_hospitals";
-          await checkEmergency.save();
-          console.log(`❌ No more hospitals available`);
-        }
-      }
-    }, 300000); // 5 minutes
-
     res.json({
       success: true,
-      message: `Alert sent to ${primaryHospital.name}. Waiting for confirmation.`,
+      message: `Alert sent to ${primaryHospital.name}`,
       emergencyId: emergency._id,
       status: "pending",
-      hospitalNotified: primaryHospital.name,
     });
   } catch (error) {
     console.log("❌ EMERGENCY ERROR:", error);
@@ -497,8 +450,8 @@ app.post("/api/emergency", async (req, res) => {
   }
 });
 
-// Accept emergency route
-app.post("/api/emergency/accept/:emergencyId", async (req, res) => {
+// ✅ ACCEPT ROUTE - CHANGED TO GET
+app.get("/api/emergency/accept/:emergencyId", async (req, res) => {
   try {
     const { emergencyId } = req.params;
     const { hospitalId } = req.query;
@@ -528,17 +481,11 @@ app.post("/api/emergency/accept/:emergencyId", async (req, res) => {
       `);
     }
 
-    // Update emergency status
     emergency.status = "accepted";
     emergency.acceptedHospital = hospitalId;
     emergency.acceptedAt = new Date();
     await emergency.save();
 
-    console.log(
-      `✅ Emergency ${emergencyId} accepted by hospital ${hospitalId}`,
-    );
-
-    // Get hospital details
     const hospital = await Hospital.findById(hospitalId);
 
     res.send(`
@@ -546,24 +493,18 @@ app.post("/api/emergency/accept/:emergencyId", async (req, res) => {
         <head>
           <style>
             body { font-family: Arial; text-align: center; padding: 50px; background: #e8f5e9; }
-            .container { max-width: 500px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .container { max-width: 500px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
             .checkmark { font-size: 80px; color: #4CAF50; }
             .button { background: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 20px; }
-            .info { text-align: left; margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 8px; }
           </style>
         </head>
         <body>
           <div class="container">
             <div class="checkmark">✅</div>
             <h2>Ambulance Dispatched!</h2>
-            <div class="info">
-              <p><strong>🏥 Hospital:</strong> ${hospital?.name || "Your hospital"}</p>
-              <p><strong>👤 Patient Name:</strong> ${emergency.userName || "Patient"}</p>
-              <p><strong>📞 Patient Phone:</strong> ${emergency.userPhone || "Not provided"}</p>
-              <p><strong>📍 Location:</strong> ${emergency.latitude}, ${emergency.longitude}</p>
-            </div>
-            <p>🚑 Ambulance has been dispatched to the patient's location.</p>
-            <p>Patient will be notified shortly.</p>
+            <p><strong>🏥 Hospital:</strong> ${hospital?.name || "Your hospital"}</p>
+            <p><strong>👤 Patient:</strong> ${emergency.userName || "Patient"}</p>
+            <p><strong>📞 Phone:</strong> ${emergency.userPhone || "Not provided"}</p>
             <a href="${emergency.googleMapsUrl}" class="button" target="_blank">📍 Navigate to Patient</a>
           </div>
         </body>
@@ -571,19 +512,12 @@ app.post("/api/emergency/accept/:emergencyId", async (req, res) => {
     `);
   } catch (error) {
     console.log("❌ Accept error:", error);
-    res.status(500).send(`
-      <html>
-        <body style="font-family: Arial; text-align: center; padding: 50px;">
-          <h2>❌ Error Processing Request</h2>
-          <p>${error.message}</p>
-        </body>
-      </html>
-    `);
+    res.status(500).send("Error processing request");
   }
 });
 
-// Reject emergency route - forwards to next hospital
-app.post("/api/emergency/reject/:emergencyId", async (req, res) => {
+// ✅ REJECT ROUTE - CHANGED TO GET
+app.get("/api/emergency/reject/:emergencyId", async (req, res) => {
   try {
     const { emergencyId } = req.params;
     const { hospitalId } = req.query;
@@ -598,7 +532,7 @@ app.post("/api/emergency/reject/:emergencyId", async (req, res) => {
     if (emergency.status !== "pending") {
       return res.send(`
         <html>
-          <body style="font-family: Arial; text-align: center; padding: 50px;">
+          <body style="text-align: center; padding: 50px;">
             <h2>⚠️ Already Processed</h2>
             <p>This emergency has already been ${emergency.status}.</p>
           </body>
@@ -606,7 +540,6 @@ app.post("/api/emergency/reject/:emergencyId", async (req, res) => {
       `);
     }
 
-    // Get all hospitals with distances
     const hospitals = await Hospital.find();
     const hospitalsWithDistance = hospitals.map((h) => ({
       ...h.toObject(),
@@ -619,7 +552,6 @@ app.post("/api/emergency/reject/:emergencyId", async (req, res) => {
     }));
     hospitalsWithDistance.sort((a, b) => a.distance - b.distance);
 
-    // Find next hospital (not the one that rejected and not already notified)
     const notifiedHospitals = emergency.hospitalsNotified || [];
     const nextHospital = hospitalsWithDistance.find(
       (h) =>
@@ -627,89 +559,47 @@ app.post("/api/emergency/reject/:emergencyId", async (req, res) => {
     );
 
     if (nextHospital) {
-      console.log(
-        `🔄 Forwarding to next hospital: ${nextHospital.name} (${nextHospital.distance.toFixed(2)} km)`,
-      );
-
-      // Update emergency with new hospital
       emergency.hospitalsNotified.push(nextHospital.name);
       emergency.primaryHospitalId = nextHospital._id;
       await emergency.save();
 
-      const acceptUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/api/emergency/accept/${emergency._id}?hospitalId=${nextHospital._id}`;
-      const rejectUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/api/emergency/reject/${emergency._id}?hospitalId=${nextHospital._id}`;
+      const baseUrl =
+        process.env.BACKEND_URL ||
+        "https://emergency-backend-8n80.onrender.com";
+      const acceptUrl = `${baseUrl}/api/emergency/accept/${emergency._id}?hospitalId=${nextHospital._id}`;
+      const rejectUrl = `${baseUrl}/api/emergency/reject/${emergency._id}?hospitalId=${nextHospital._id}`;
 
       await transporter.sendMail({
         from: process.env.EMAIL_USER,
         to: nextHospital.email,
-        subject: `🚨 EMERGENCY - ${emergency.userName || "Patient"} needs ambulance (Forwarded)`,
+        subject: `🚨 EMERGENCY - ${emergency.userName} needs ambulance (Forwarded)`,
         html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="UTF-8">
-            <title>Emergency Alert (Forwarded)</title>
-            <style>
-              body { font-family: Arial, sans-serif; }
-              .container { max-width: 600px; margin: 0 auto; border: 2px solid #ff9800; border-radius: 10px; }
-              .header { background: #ff9800; padding: 20px; text-align: center; color: white; }
-              .content { padding: 20px; }
-              .button { display: inline-block; padding: 12px 24px; margin: 10px; text-decoration: none; border-radius: 5px; font-weight: bold; }
-              .accept { background: #4CAF50; color: white; }
-              .reject { background: #f44336; color: white; }
-              .info { background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 15px 0; }
-              .note { background: #fff3cd; padding: 10px; border-radius: 5px; color: #856404; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="header">
-                <h2>🚨 EMERGENCY ALERT (Forwarded) 🚨</h2>
-              </div>
-              <div class="content">
-                <div class="note">
-                  <strong>⚠️ Note:</strong> Previous hospital could not respond to this emergency.
-                </div>
-                <div class="info">
-                  <h3>👤 Patient Details:</h3>
-                  <p><strong>Name:</strong> ${emergency.userName || "Not provided"}</p>
-                  <p><strong>Phone:</strong> <a href="tel:${emergency.userPhone}">${emergency.userPhone || "Not provided"}</a></p>
-                  <p><strong>Email:</strong> ${emergency.userEmail || "Not provided"}</p>
-                  <p><strong>Distance from you:</strong> ${nextHospital.distance.toFixed(2)} km</p>
-                  <p><strong>Location:</strong> ${emergency.latitude}, ${emergency.longitude}</p>
-                  <p><strong>Google Maps:</strong> <a href="${emergency.googleMapsUrl}" target="_blank">Click here</a></p>
-                </div>
-                <div style="text-align: center;">
-                  <a href="${acceptUrl}" class="button accept">✅ ACCEPT & Send Ambulance</a>
-                  <a href="${rejectUrl}" class="button reject">❌ REJECT</a>
-                </div>
-              </div>
-            </div>
-          </body>
-          </html>
+          <h2>🚨 Emergency Alert (Forwarded)</h2>
+          <p><strong>Patient:</strong> ${emergency.userName}</p>
+          <p><strong>Phone:</strong> ${emergency.userPhone}</p>
+          <p><strong>Distance:</strong> ${nextHospital.distance.toFixed(2)} km</p>
+          <p><strong>Note:</strong> Previous hospital could not respond.</p>
+          <a href="${acceptUrl}" style="background: green; color: white; padding: 10px;">✅ ACCEPT</a>
+          <a href="${rejectUrl}" style="background: red; color: white; padding: 10px;">❌ REJECT</a>
         `,
       });
 
       res.send(`
         <html>
-          <body style="font-family: Arial; text-align: center; padding: 50px;">
+          <body style="text-align: center; padding: 50px;">
             <h2>⚠️ Request Forwarded</h2>
-            <p>Emergency has been forwarded to: <strong>${nextHospital.name}</strong></p>
-            <p>Distance: ${nextHospital.distance.toFixed(2)} km</p>
+            <p>Emergency forwarded to: <strong>${nextHospital.name}</strong></p>
           </body>
         </html>
       `);
     } else {
-      // No more hospitals available
       emergency.status = "no_hospitals";
       await emergency.save();
-
       res.send(`
         <html>
-          <body style="font-family: Arial; text-align: center; padding: 50px;">
+          <body style="text-align: center; padding: 50px;">
             <h2>⚠️ No Hospitals Available</h2>
-            <p>All nearby hospitals are unable to respond.</p>
-            <p>Please contact emergency services directly: <strong>108</strong></p>
+            <p>Please call emergency services: <strong>108</strong></p>
           </body>
         </html>
       `);
@@ -736,8 +626,6 @@ app.get("/api/emergency/status/:emergencyId", async (req, res) => {
       userPhone: emergency.userPhone,
       hospitalsNotified: emergency.hospitalsNotified,
       createdAt: emergency.createdAt,
-      acceptedHospital: emergency.acceptedHospital,
-      acceptedAt: emergency.acceptedAt,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -747,17 +635,13 @@ app.get("/api/emergency/status/:emergencyId", async (req, res) => {
 /* ===== GET ALL EMERGENCIES ===== */
 app.get("/api/emergency", async (req, res) => {
   const data = await Emergency.find().sort({ createdAt: -1 });
-  res.json({
-    success: true,
-    data,
-  });
+  res.json({ success: true, data });
 });
 
-/* ===== DELETE ALL HOSPITALS (FOR TESTING) ===== */
+/* ===== DELETE ALL HOSPITALS ===== */
 app.delete("/api/hospitals/clear", async (req, res) => {
   try {
     const result = await Hospital.deleteMany({});
-    console.log(`🗑️ Deleted ${result.deletedCount} hospitals`);
     res.json({
       success: true,
       message: `Deleted ${result.deletedCount} hospitals`,
@@ -767,13 +651,12 @@ app.delete("/api/hospitals/clear", async (req, res) => {
   }
 });
 
-/* ===== AUTO INIT HOSPITALS ON START ===== */
+/* ===== AUTO INIT HOSPITALS ===== */
 const initHospitals = async () => {
   try {
     const count = await Hospital.countDocuments();
     if (count === 0) {
-      console.log("📦 No hospitals found. Adding default hospitals...");
-
+      console.log("📦 Adding default hospitals...");
       const defaultHospitals = [
         {
           name: "Fortis Hospital",
@@ -781,7 +664,7 @@ const initHospitals = async () => {
           latitude: 28.6212,
           longitude: 77.3796,
           phone: "+91-7524021510",
-          address: "Sector 62, Noida, Uttar Pradesh 201301",
+          address: "Sector 62, Noida",
           emergency: "24/7",
           rating: "4.8",
           bedsAvailable: 200,
@@ -797,7 +680,7 @@ const initHospitals = async () => {
           latitude: 28.6457,
           longitude: 77.3179,
           phone: "+91-11-12345678",
-          address: "Anand Vihar, Delhi - 110092",
+          address: "Anand Vihar, Delhi",
           emergency: "24/7",
           rating: "4.7",
           bedsAvailable: 180,
@@ -813,7 +696,7 @@ const initHospitals = async () => {
           latitude: 28.5997,
           longitude: 77.4012,
           phone: "+91-120-4567890",
-          address: "Sector 71, Noida, Uttar Pradesh 201301",
+          address: "Sector 71, Noida",
           emergency: "24/7",
           rating: "4.5",
           bedsAvailable: 150,
@@ -829,7 +712,7 @@ const initHospitals = async () => {
           latitude: 28.5856,
           longitude: 77.3181,
           phone: "+91-120-9876543",
-          address: "Sector 12, Noida, Uttar Pradesh 201301",
+          address: "Sector 12, Noida",
           emergency: "24/7",
           rating: "4.6",
           bedsAvailable: 220,
@@ -841,11 +724,11 @@ const initHospitals = async () => {
         },
         {
           name: "Yatharth Super Speciality Hospital",
-          email: "hospitalert4@gmail.com",
+          email: "pranshu.diwakar.739914@gmail.com",
           latitude: 28.5789,
           longitude: 77.4215,
           phone: "+91-120-7890123",
-          address: "Sector 110, Noida, Uttar Pradesh 201304",
+          address: "Sector 110, Noida",
           emergency: "24/7",
           rating: "4.4",
           bedsAvailable: 300,
@@ -856,14 +739,11 @@ const initHospitals = async () => {
             "https://images.pexels.com/photos/236477/pexels-photo-236477.jpeg?w=500&h=300&fit=crop",
         },
       ];
-
       await Hospital.insertMany(defaultHospitals);
-      console.log(`✅ ${defaultHospitals.length} hospitals added to database!`);
-    } else {
-      console.log(`✅ ${count} hospitals already exist in database`);
+      console.log(`✅ ${defaultHospitals.length} hospitals added!`);
     }
   } catch (error) {
-    console.log("❌ Error initializing hospitals:", error.message);
+    console.log("❌ Error:", error.message);
   }
 };
 
