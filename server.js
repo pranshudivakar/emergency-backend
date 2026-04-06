@@ -106,20 +106,26 @@ const Emergency = mongoose.model(
 );
 
 /* ===== EMAIL CONFIG ===== */
+/* ===== EMAIL CONFIG ===== */
 
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  family: 4,
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 30000,
 });
 
 transporter.verify((err) => {
   if (err) console.log("❌ Email Server Error:", err);
   else console.log("✅ Email Server Ready");
 });
-
 /* ===== DISTANCE FUNCTION ===== */
 
 function getDistance(lat1, lon1, lat2, lon2) {
@@ -367,7 +373,7 @@ app.post("/api/emergency", async (req, res) => {
     const googleMapsUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
 
     const baseUrl =
-      process.env.BACKEND_URL || "https://emergency-backend-8n80.onrender.com";
+      process.env.BACKEND_URL || "https://emergency-healthcare.onrender.com";
 
     const emergency = await Emergency.create({
       userId,
@@ -382,7 +388,6 @@ app.post("/api/emergency", async (req, res) => {
       primaryHospitalId: primaryHospital._id,
     });
 
-    // ✅ USING GET METHOD FOR EMAIL LINKS
     const acceptUrl = `${baseUrl}/api/emergency/accept/${emergency._id}?hospitalId=${primaryHospital._id}`;
     const rejectUrl = `${baseUrl}/api/emergency/reject/${emergency._id}?hospitalId=${primaryHospital._id}`;
 
@@ -450,7 +455,7 @@ app.post("/api/emergency", async (req, res) => {
   }
 });
 
-// ✅ ACCEPT ROUTE - CHANGED TO GET
+// ✅ ACCEPT ROUTE - With Close Button & Auto Refresh
 app.get("/api/emergency/accept/:emergencyId", async (req, res) => {
   try {
     const { emergencyId } = req.params;
@@ -462,9 +467,10 @@ app.get("/api/emergency/accept/:emergencyId", async (req, res) => {
     if (!emergency) {
       return res.status(404).send(`
         <html>
+          <head><meta http-equiv="refresh" content="3; url=/"></head>
           <body style="font-family: Arial; text-align: center; padding: 50px;">
             <h2>❌ Emergency Not Found</h2>
-            <p>The emergency request does not exist.</p>
+            <p>Redirecting to home page...</p>
           </body>
         </html>
       `);
@@ -473,9 +479,11 @@ app.get("/api/emergency/accept/:emergencyId", async (req, res) => {
     if (emergency.status !== "pending") {
       return res.send(`
         <html>
+          <head><meta http-equiv="refresh" content="3; url=/"></head>
           <body style="font-family: Arial; text-align: center; padding: 50px;">
             <h2>⚠️ Already Processed</h2>
             <p>This emergency has already been ${emergency.status}.</p>
+            <p>Redirecting to home page...</p>
           </body>
         </html>
       `);
@@ -491,32 +499,55 @@ app.get("/api/emergency/accept/:emergencyId", async (req, res) => {
     res.send(`
       <html>
         <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Ambulance Dispatched</title>
           <style>
-            body { font-family: Arial; text-align: center; padding: 50px; background: #e8f5e9; }
-            .container { max-width: 500px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+            body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #e8f5e9; }
+            .container { max-width: 500px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
             .checkmark { font-size: 80px; color: #4CAF50; }
-            .button { background: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 20px; }
+            .button { background: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px; }
+            .close-btn { background: #2196F3; }
+            .info { margin: 20px 0; text-align: left; background: #f5f5f5; padding: 15px; border-radius: 8px; }
           </style>
         </head>
         <body>
           <div class="container">
             <div class="checkmark">✅</div>
             <h2>Ambulance Dispatched!</h2>
-            <p><strong>🏥 Hospital:</strong> ${hospital?.name || "Your hospital"}</p>
-            <p><strong>👤 Patient:</strong> ${emergency.userName || "Patient"}</p>
-            <p><strong>📞 Phone:</strong> ${emergency.userPhone || "Not provided"}</p>
+            <div class="info">
+              <p><strong>🏥 Hospital:</strong> ${hospital?.name || "Your hospital"}</p>
+              <p><strong>📍 Address:</strong> ${hospital?.address || "N/A"}</p>
+              <p><strong>👤 Patient:</strong> ${emergency.userName || "Patient"}</p>
+              <p><strong>📞 Patient Phone:</strong> ${emergency.userPhone || "Not provided"}</p>
+            </div>
             <a href="${emergency.googleMapsUrl}" class="button" target="_blank">📍 Navigate to Patient</a>
+            <br/>
+            <button class="button close-btn" onclick="window.close()">Close Window</button>
           </div>
+          <script>
+            setTimeout(function() {
+              window.close();
+            }, 10000);
+          </script>
         </body>
       </html>
     `);
   } catch (error) {
     console.log("❌ Accept error:", error);
-    res.status(500).send("Error processing request");
+    res.status(500).send(`
+      <html>
+        <body style="font-family: Arial; text-align: center; padding: 50px;">
+          <h2>❌ Error Processing Request</h2>
+          <p>${error.message}</p>
+          <button onclick="window.close()">Close</button>
+        </body>
+      </html>
+    `);
   }
 });
 
-// ✅ REJECT ROUTE - CHANGED TO GET
+// ✅ REJECT ROUTE - With Auto Forward & Close Button
 app.get("/api/emergency/reject/:emergencyId", async (req, res) => {
   try {
     const { emergencyId } = req.params;
@@ -526,15 +557,25 @@ app.get("/api/emergency/reject/:emergencyId", async (req, res) => {
 
     const emergency = await Emergency.findById(emergencyId);
     if (!emergency) {
-      return res.status(404).send("Emergency not found");
+      return res.status(404).send(`
+        <html>
+          <head><meta http-equiv="refresh" content="3; url=/"></head>
+          <body style="text-align: center; padding: 50px;">
+            <h2>❌ Emergency Not Found</h2>
+            <p>Redirecting...</p>
+          </body>
+        </html>
+      `);
     }
 
     if (emergency.status !== "pending") {
       return res.send(`
         <html>
+          <head><meta http-equiv="refresh" content="3; url=/"></head>
           <body style="text-align: center; padding: 50px;">
             <h2>⚠️ Already Processed</h2>
             <p>This emergency has already been ${emergency.status}.</p>
+            <p>Redirecting...</p>
           </body>
         </html>
       `);
@@ -564,8 +605,7 @@ app.get("/api/emergency/reject/:emergencyId", async (req, res) => {
       await emergency.save();
 
       const baseUrl =
-        process.env.BACKEND_URL ||
-        "https://emergency-backend-8n80.onrender.com";
+        process.env.BACKEND_URL || "https://emergency-healthcare.onrender.com";
       const acceptUrl = `${baseUrl}/api/emergency/accept/${emergency._id}?hospitalId=${nextHospital._id}`;
       const rejectUrl = `${baseUrl}/api/emergency/reject/${emergency._id}?hospitalId=${nextHospital._id}`;
 
@@ -586,9 +626,13 @@ app.get("/api/emergency/reject/:emergencyId", async (req, res) => {
 
       res.send(`
         <html>
-          <body style="text-align: center; padding: 50px;">
+          <head><meta http-equiv="refresh" content="5; url=/"></head>
+          <body style="font-family: Arial; text-align: center; padding: 50px;">
             <h2>⚠️ Request Forwarded</h2>
             <p>Emergency forwarded to: <strong>${nextHospital.name}</strong></p>
+            <p>Distance: ${nextHospital.distance.toFixed(2)} km</p>
+            <button onclick="window.close()">Close Window</button>
+            <p>This window will close automatically in 5 seconds.</p>
           </body>
         </html>
       `);
@@ -597,16 +641,25 @@ app.get("/api/emergency/reject/:emergencyId", async (req, res) => {
       await emergency.save();
       res.send(`
         <html>
-          <body style="text-align: center; padding: 50px;">
+          <body style="font-family: Arial; text-align: center; padding: 50px;">
             <h2>⚠️ No Hospitals Available</h2>
             <p>Please call emergency services: <strong>108</strong></p>
+            <button onclick="window.close()">Close</button>
           </body>
         </html>
       `);
     }
   } catch (error) {
     console.log("❌ Reject error:", error);
-    res.status(500).send("Error processing rejection");
+    res.status(500).send(`
+      <html>
+        <body style="text-align: center; padding: 50px;">
+          <h2>❌ Error Processing Request</h2>
+          <p>${error.message}</p>
+          <button onclick="window.close()">Close</button>
+        </body>
+      </html>
+    `);
   }
 });
 
