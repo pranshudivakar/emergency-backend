@@ -33,10 +33,14 @@ app.use(
 app.use(express.json());
 
 /* ===== DATABASE CONNECTION ===== */
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch((err) => console.log("❌ MongoDB Error:", err));
+ mongoose
+    .connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 60000, // 60 seconds
+      socketTimeoutMS: 60000,
+      connectTimeoutMS: 60000,
+    })
+    .then(() => console.log("✅ MongoDB Connected"))
+    .catch((err) => console.log("❌ MongoDB Error:", err));
 
 /* ===== MODELS ===== */
 
